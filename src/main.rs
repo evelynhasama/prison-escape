@@ -3,41 +3,34 @@ struct World {
     current_map:usize, // An index into the maps vec.
 }
 struct Map {
-    // There are other ways to do this, but this is fine for now.
-    tiles:[[Tile; 80]; 23], // An grid of 23 rows of 80 Tiles
+    tiles:[[Tile; 81]; 23], // An grid of 23 rows of 80 Tiles
     entities:Vec<Thing>, // We'll assume the player is always the 0th thing in this list
-    // There's no strong reason the player
-    // has to be "just another entity"---we could just as well
-    // have separate vecs of each type of entity, and a
-    // special `player:Option<Player>` field, or make the Player a property
-    // of the world and not the room.  This is just one
-    // arbitrary choice among many possible alternatives.
 }
 #[derive(Clone,Copy)]
 enum Tile {
     Empty,
     Wall,
-    Stairs(usize,(u8,u8)), // The usize here is the map to which the stairs go, the tuple is where in that map
+    Key(DoorID), 
+    Door(DoorID), 
 }
+
+#[derive(PartialEq, Eq, Clone, Copy)]
+struct DoorID(usize);
 struct Thing {
     position:(u8,u8),
     thing_type:ThingType
 }
 enum ThingType {
-    // These variants are empty now but they could just as well be given associated data
-    Player/* (PlayerData) */,
-    Enemy/* (EnemyType, EnemyData) */,
-    // Treasure,
-    // ...
+    Prisoner,
+    Guard,
 }
 
-enum GameMode {
-    Playing,
-    InventoryMenu,
-    ShopMenu
+struct PrisonerState {
+    keys: Vec<DoorID>,
+    health: usize,
 }
 
-use crossterm::style::{Color, Colors};
+use crossterm::{style::{Color, Colors}, ExecutableCommand};
 trait Style {
     fn colors(&self) -> Colors;
     fn look(&self) -> char;
@@ -47,28 +40,30 @@ impl Style for Tile {
         match self {
             Tile::Empty => Colors{foreground:Some(Color::Black), background:Some(Color::Black)},
             Tile::Wall => Colors{foreground:Some(Color::White), background:Some(Color::Black)},
-            Tile::Stairs(_,_) => Colors{foreground:Some(Color::White), background:Some(Color::Black)},
+            Tile::Door(_) => Colors{foreground:Some(Color::Cyan), background:Some(Color::Black)},
+            Tile::Key(_) => Colors{foreground:Some(Color::Yellow), background:Some(Color::Black)},
         }
     }
     fn look(&self) -> char {
         match self {
             Tile::Empty => '.',
             Tile::Wall => '#',
-            Tile::Stairs(_,_) => '>',
+            Tile::Door(_) => '>',
+            Tile::Key(_) => '*',
         }
     }
 }
 impl Style for ThingType {
     fn colors(&self) -> Colors {
         match self {
-            ThingType::Player => Colors{foreground:Some(Color::White), background:Some(Color::Black)},
-            ThingType::Enemy => Colors{foreground:Some(Color::Red), background:Some(Color::Black)},
+            ThingType::Prisoner => Colors{foreground:Some(Color::Green), background:Some(Color::Black)},
+            ThingType::Guard => Colors{foreground:Some(Color::Red), background:Some(Color::Black)},
         }
     }
     fn look(&self) -> char {
         match self {
-            ThingType::Player => '@',
-            ThingType::Enemy => 'E',
+            ThingType::Prisoner => '@',
+            ThingType::Guard => 'G',
         }
     }
 }
@@ -120,9 +115,11 @@ fn parse_tilemap<const W:usize, const H:usize>(text:&'static str) -> [[Tile; W] 
             let tile = match ch {
                 '#' => Tile::Wall,
                 '.' => Tile::Empty,
-                '0'..='9' => Tile::Stairs(
-                    ch.to_digit(10).unwrap() as usize,
-                    (x as u8,y as u8)
+                '0'..='4' => Tile::Door(
+                    DoorID(ch.to_digit(10).unwrap() as usize),
+                ),
+                '5'..='9' => Tile::Key(
+                    DoorID(ch.to_digit(10).unwrap() as usize - 5)
                 ),
                 _ => Tile::Empty
             };
@@ -138,14 +135,13 @@ fn main() -> std::io::Result<()> {
     use std::io::stdout;
     use crossterm::event::{read, Event, KeyEvent, KeyEventKind, KeyCode};
     use rand::Rng;
+    use crossterm::terminal;
 
     let mut rng = rand::thread_rng();
     let mut stdout = stdout();
     {
-        // we can even scope a use to just a single block!
-        use crossterm::{terminal, ExecutableCommand};
         terminal::enable_raw_mode()?;
-        stdout.execute(crossterm::terminal::SetSize(80,24))?;
+        stdout.execute(crossterm::terminal::SetSize(80,27))?;
         stdout.execute(crossterm::cursor::Hide)?;
         stdout.execute(terminal::Clear(terminal::ClearType::All))?;
     }
@@ -155,22 +151,51 @@ fn main() -> std::io::Result<()> {
             Map {
                 tiles:parse_tilemap(include_str!("map0.txt")),
                 entities:vec![
-                    Thing{thing_type:ThingType::Player, position:(2,2)},
-                    Thing{thing_type:ThingType::Enemy, position:(39,17)},
+                    Thing{thing_type:ThingType::Prisoner, position:(53,7)},
+                    Thing{thing_type:ThingType::Guard, position:(21,15)},
+                    Thing{thing_type:ThingType::Guard, position:(65,11)},
+                    Thing{thing_type:ThingType::Guard, position:(74,20)},
+                    Thing{thing_type:ThingType::Guard, position:(8,19)},
                 ]
             },
             Map {
                 tiles:parse_tilemap(include_str!("map1.txt")),
                 entities:vec![
-                    Thing{thing_type:ThingType::Enemy, position:(52,21)},
+                    Thing{thing_type:ThingType::Guard, position:(7,9)},
+                    Thing{thing_type:ThingType::Guard, position:(76,14)},
+                    Thing{thing_type:ThingType::Guard, position:(39,15)},
+                ]
+            },
+            Map {
+                tiles:parse_tilemap(include_str!("map2.txt")),
+                entities:vec![
+                    Thing{thing_type:ThingType::Guard, position:(47,9)},
+                    Thing{thing_type:ThingType::Guard, position:(69,13)},
+                    Thing{thing_type:ThingType::Guard, position:(19,22)},
+                    Thing{thing_type:ThingType::Guard, position:(29,3)},
                 ]
             }
         ],
         current_map:0
     };
     let mut game_over = false;
+    let mut prisoner_state: PrisonerState = PrisonerState{keys: [].to_vec(), health: 100};
     // One initial draw so that we have something on screen before the first event arrives.
     world.maps[world.current_map].draw(&mut stdout)?;
+
+    // print instructions
+    stdout.execute(crossterm::cursor::MoveTo(0, 23))?;
+    stdout.execute(crossterm::style::SetColors(Colors{foreground:Some(Color::Black), background:Some(Color::White)}))?;
+    let instruction1 = "Escape the Prison! ";
+    stdout.execute(crossterm::style::Print(instruction1))?;
+    stdout.execute(crossterm::cursor::MoveTo(0, 24))?;
+    stdout.execute(crossterm::style::SetColors(Colors{foreground:Some(Color::Black), background:Some(Color::White)}))?;
+    let instruction1 = "Collect keys * to open doors > Don't get caught by the guards G!";
+    stdout.execute(crossterm::style::Print(instruction1))?;
+    stdout.execute(crossterm::cursor::MoveTo(0, 25))?;
+    stdout.execute(crossterm::style::SetColors(Colors{foreground:Some(Color::Black), background:Some(Color::White)}))?;
+    let instruction1 = "You are currently in your cell. Goodluck!";
+    stdout.execute(crossterm::style::Print(instruction1))?;
 
     // ... event loop and everything else goes here...
     // Get the next event from crossterm, waiting until it's ready
@@ -185,7 +210,6 @@ fn main() -> std::io::Result<()> {
                 Colors{foreground:None, background:None}
             );
             // Game rule updates: first, interpret key events.
-            // If you have custom game rules you might want e.g. i to open the inventory.
             let (dx,dy) = match code {
                 KeyCode::Left => (-1, 0),
                 KeyCode::Right => (1, 0),
@@ -199,39 +223,73 @@ fn main() -> std::io::Result<()> {
             map.move_entity(0, dx, dy);
             // Then loop through all the other entities and have them move randomly
             for ent in 1..map.entities.len() {
-                let dx:i8 = rng.gen_range(-1..=1);
-                let dy:i8 = rng.gen_range(-1..=1);
+                let dx:i8 = rng.gen_range(-2..=2);
+                let dy:i8 = rng.gen_range(-2..=2);
                 map.move_entity(ent, dx, dy);
             }
             // Remember where the player is now...
             let (x,y) = map.entities[0].position;
             // if any enemy is touching the player, game over
             for ent in map.entities[1..].iter() {
-                // Matching with `if let` is used here since we haven't
-                // implemented or derived PartialEq or Eq on ThingType.
-                // We'll talk about that another time.
-                if let ThingType::Enemy = ent.thing_type {
+                if let ThingType::Guard = ent.thing_type {
                     if ent.position == (x,y) {
-                        // Set a status message to render later
-                        status_message = ("You died!", Colors{foreground:Some(Color::Red), background:Some(Color::Black)});
-                        game_over = true;
+                        prisoner_state.health -= 50;
+                        if prisoner_state.health == 0 {
+                            // Set a status message to render later
+                            status_message = ("You died! Game Over", Colors{foreground:Some(Color::Red), background:Some(Color::White)});
+                            game_over = true;
+                        } else {
+                            status_message = ("A guard hit you", Colors{foreground:Some(Color::Red), background:Some(Color::White)});
+                        }
+                        
                     }
                 }
             }
-            // Maybe move between floors
-            if let Tile::Stairs(to_map, to_pos) = map.tiles[y as usize][x as usize] {
-                world.current_map = to_map;
-                // We'll also move the special player entity where it goes
-                // in the new room.
-                let mut player = map.entities.remove(0);
-                player.position = to_pos;
-                world.maps[to_map].entities.insert(0,player);
+            // Maybe move between rooms
+            if let Tile::Door(door_id       ) = map.tiles[y as usize][x as usize] {
+                if door_id == DoorID(3) {
+                    status_message = ("You made it out! Enjoy your freedom          ", Colors{foreground:Some(Color::DarkGreen), background:Some(Color::White)});
+                    game_over = true;
+                }
+                else if prisoner_state.keys.contains(&door_id) {
+                    world.current_map = world.current_map + 1;
+                    // move player to new room
+                    let mut player = map.entities.remove(0);
+                    if door_id == DoorID(1) {
+                        status_message = ("You are entering the infirmary              ", Colors{foreground:Some(Color::Red), background:Some(Color::White)});
+                        player.position = (6,0);
+                    } else if door_id == DoorID(0) {
+                        status_message = ("You are entering the cafeteria              ", Colors{foreground:Some(Color::Red), background:Some(Color::White)});
+                        player.position = (74,0);
+                    } else {
+                        status_message = ("Find your way through the tunnels                   ", Colors{foreground:Some(Color::Red), background:Some(Color::White)});
+                        player.position = (40,0);
+                    }
+                    world.maps[world.current_map].entities.insert(0,player);
+                } else {
+                    status_message = ("You need a key or the right key to open this door!          ", Colors{foreground:Some(Color::Red), background:Some(Color::White)});
+                }
+                
+            }
+            // maybe get a key
+            else if let Tile::Key(door_id       ) = map.tiles[y as usize][x as usize] {
+                prisoner_state.keys.push(door_id);
+                status_message = ("You collected a key!                   ", Colors{foreground:Some(Color::Red), background:Some(Color::White)});
+                // remove key from map
+                map.tiles[y as usize][x as usize] = Tile::Empty
             }
             // Update's done; render the game state.
             world.maps[world.current_map].draw(&mut stdout)?;
             {
-                use crossterm::ExecutableCommand;
                 stdout.execute(crossterm::cursor::MoveTo(0, 23))?;
+                stdout.execute(crossterm::style::SetColors(Colors{foreground:Some(Color::Black), background:Some(Color::White)}))?;
+                let inventory = "Inventory: ".to_string() + &(prisoner_state.keys.len()).to_string() + " keys                                                               ";
+                stdout.execute(crossterm::style::Print(inventory))?;
+                stdout.execute(crossterm::cursor::MoveTo(0, 24))?;
+                stdout.execute(crossterm::style::SetColors(Colors{foreground:Some(Color::Black), background:Some(Color::White)}))?;
+                let inventory = "Health: ".to_string() + &(prisoner_state.health).to_string() + "%                                                                     ";
+                stdout.execute(crossterm::style::Print(inventory))?;
+                stdout.execute(crossterm::cursor::MoveTo(0, 25))?;
                 stdout.execute(crossterm::style::SetColors(status_message.1))?;
                 stdout.execute(crossterm::style::Print(status_message.0))?;
             }
@@ -240,7 +298,6 @@ fn main() -> std::io::Result<()> {
 
     // Then we finally clean up:
     {
-        use crossterm::{terminal,ExecutableCommand};
         terminal::disable_raw_mode()?;
         stdout.execute(crossterm::cursor::Show)?;
         stdout.execute(terminal::Clear(terminal::ClearType::All))?;
