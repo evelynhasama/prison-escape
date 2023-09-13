@@ -256,10 +256,10 @@ fn main() -> std::io::Result<()> {
                     // move player to new room
                     let mut player = map.entities.remove(0);
                     if door_id == DoorID(1) {
-                        status_message = ("You are entering the infirmary              ", Colors{foreground:Some(Color::Red), background:Some(Color::White)});
+                        status_message = ("You are entering the cafeteria              ", Colors{foreground:Some(Color::Red), background:Some(Color::White)});
                         player.position = (6,0);
                     } else if door_id == DoorID(0) {
-                        status_message = ("You are entering the cafeteria              ", Colors{foreground:Some(Color::Red), background:Some(Color::White)});
+                        status_message = ("You are entering the infirmary              ", Colors{foreground:Some(Color::Red), background:Some(Color::White)});
                         player.position = (74,0);
                     } else {
                         status_message = ("Find your way through the tunnels                   ", Colors{foreground:Some(Color::Red), background:Some(Color::White)});
