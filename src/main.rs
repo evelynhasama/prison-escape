@@ -190,12 +190,16 @@ fn main() -> std::io::Result<()> {
     stdout.execute(crossterm::style::Print(instruction1))?;
     stdout.execute(crossterm::cursor::MoveTo(0, 24))?;
     stdout.execute(crossterm::style::SetColors(Colors{foreground:Some(Color::Black), background:Some(Color::White)}))?;
-    let instruction1 = "Collect keys * to open doors > Don't get caught by the guards G!";
-    stdout.execute(crossterm::style::Print(instruction1))?;
+    let instruction2 = "You are the @ Use the arrow keys to navigate";
+    stdout.execute(crossterm::style::Print(instruction2))?;
     stdout.execute(crossterm::cursor::MoveTo(0, 25))?;
     stdout.execute(crossterm::style::SetColors(Colors{foreground:Some(Color::Black), background:Some(Color::White)}))?;
-    let instruction1 = "You are currently in your cell. Goodluck!";
-    stdout.execute(crossterm::style::Print(instruction1))?;
+    let instruction3 = "Collect keys * to open doors > Don't get caught by the guards G!";
+    stdout.execute(crossterm::style::Print(instruction3))?;
+    stdout.execute(crossterm::cursor::MoveTo(0, 26))?;
+    stdout.execute(crossterm::style::SetColors(Colors{foreground:Some(Color::Black), background:Some(Color::White)}))?;
+    let instruction4 = "You are currently in your cell. Goodluck!";
+    stdout.execute(crossterm::style::Print(instruction4))?;
 
     // ... event loop and everything else goes here...
     // Get the next event from crossterm, waiting until it's ready
@@ -290,6 +294,9 @@ fn main() -> std::io::Result<()> {
                 let inventory = "Health: ".to_string() + &(prisoner_state.health).to_string() + "%                                                                     ";
                 stdout.execute(crossterm::style::Print(inventory))?;
                 stdout.execute(crossterm::cursor::MoveTo(0, 25))?;
+                stdout.execute(crossterm::style::SetColors(Colors{foreground:None, background:None}))?;
+                stdout.execute(crossterm::style::Print("                                                                                "))?;
+                stdout.execute(crossterm::cursor::MoveTo(0, 26))?;
                 stdout.execute(crossterm::style::SetColors(status_message.1))?;
                 stdout.execute(crossterm::style::Print(status_message.0))?;
             }
